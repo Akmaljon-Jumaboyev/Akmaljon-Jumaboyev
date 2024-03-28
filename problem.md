@@ -1,6 +1,10 @@
+#include <iostream>
 #include <vector>
 
-void insertionSort(std::vector<int> &v) {
+
+using namespace std;
+
+void insertionSort(vector<int> &v) {
     int n = v.size();
     for (int i = 1; i < n; ++i) {
         int key = v[i];
@@ -12,5 +16,9 @@ void insertionSort(std::vector<int> &v) {
         v[j + 1] = key;
     }
 }
+int main(){
+insertionSort(4);
 
-
+  
+return 0;
+}
