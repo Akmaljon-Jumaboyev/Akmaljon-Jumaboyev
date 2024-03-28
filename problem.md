@@ -1,12 +1,16 @@
-- 👋 Hi, I’m @Akmaljon-Jumaboyev
-- 👀 I’m interested in ...
-- 🌱 I’m currently learning ...
-- 💞️ I’m looking to collaborate on ...
-- 📫 How to reach me ...
-- 😄 Pronouns: ...
-- ⚡ Fun fact: ...
+#include <vector>
 
-<!---
-Akmaljon-Jumaboyev/Akmaljon-Jumaboyev is a ✨ special ✨ repository because its `README.md` (this file) appears on your GitHub profile.
-You can click the Preview link to take a look at your changes.
---->
+void insertionSort(std::vector<int> &v) {
+    int n = v.size();
+    for (int i = 1; i < n; ++i) {
+        int key = v[i];
+        int j = i - 1;
+        while (j >= 0 && v[j] < key) {
+            v[j + 1] = v[j];
+            j = j - 1;
+        }
+        v[j + 1] = key;
+    }
+}
+
+
