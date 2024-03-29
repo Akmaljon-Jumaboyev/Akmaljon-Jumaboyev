@@ -1,10 +1,9 @@
-#include <iostream>
 #include <vector>
-
+#include <iostream>
 
 using namespace std;
 
-void insertionSort(vector<int> &v) {
+void insertionSort(vector<int>& v) {
     int n = v.size();
     for (int i = 1; i < n; ++i) {
         int key = v[i];
@@ -16,9 +15,24 @@ void insertionSort(vector<int> &v) {
         v[j + 1] = key;
     }
 }
-int main(){
-insertionSort(4);
 
-  
-return 0;
+int main() {
+    vector<int> arr = {5, 8, 3, 6, 2, 9, 1};
+
+    cout << "Original array:" << endl;
+    for (int num : arr) {
+        cout << num << " ";
+    }
+    cout << endl;
+
+    insertionSort(arr);
+
+    cout << "Array sorted in non-increasing order:" << endl;
+    for (int num : arr) {
+        cout << num << " ";
+    }
+    cout << endl;
+
+    return 0;
 }
+
