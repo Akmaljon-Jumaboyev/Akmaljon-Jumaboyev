@@ -1,0 +1,1258 @@
+public interface ICompilationEngine {
+
+    void compileClass();
+
+    void compileClassVarDec();
+
+    void compileVarDec();
+
+    String compileType();
+
+    void compileSubroutine();
+
+    void compileParameterList();
+
+    void compileSubroutineBody();
+
+    void compileStatements();
+
+    void compileLet();
+
+    void compileDo();
+
+    int compileExpressionList();
+
+    void compileWhile();
+
+    void compileReturn();
+
+    void compileIf();
+    void compileExpression();
+    void compileTerm();
+}
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+
+public class JackAnalyzer {
+    static List<JackTokenizer> jackTokenizerList = new ArrayList<>();
+
+    public static void main(String[] args) {
+        String filePath = args[0];
+        traverseFolder(filePath);
+        for (JackTokenizer jackTokenizer : jackTokenizerList) {
+            //generate T.xml
+            // new CompilationEngine(jackTokenizer,"");
+            System.out.println(jackTokenizer.getFileName() + " is being compiled");
+            jackTokenizer.initPointer();
+            new XMLCompilationEngine(jackTokenizer);
+        }
+    }
+
+    public static void traverseFolder(String path) {
+        File file = new File(path);
+        if (file.exists()) {
+            if (file.getName().endsWith(".jack")) {
+                JackTokenizer jackTokenizer = new JackTokenizer(path);
+                jackTokenizerList.add(jackTokenizer);
+                return;
+            }
+            File[] files = file.listFiles();
+            if (files.length == 0) {
+                System.err.println("The folder is empty!");
+                return;
+            } else {
+                for (File item : files) {
+                    String filePath = item.getAbsolutePath();
+                    if (filePath.endsWith(".jack")) {
+                        JackTokenizer jackTokenizer = new JackTokenizer(filePath);
+                        jackTokenizerList.add(jackTokenizer);
+                    }
+                }
+            }
+        } else {
+            System.err.println("no .jack file!");
+        }
+    }
+}
+import myenum.TokenType;
+import utils.NumberUtils;
+import utils.StringUtils;
+
+import java.io.*;
+import java.util.ArrayList;
+import java.util.List;
+
+import static myenum.StringEnum.*;
+import static myenum.StringEnum.KEYWORD_FIELD;
+import static myenum.StringEnum.KEYWORD_STATIC;
+import static myenum.TokenType.*;
+
+public class JackTokenizer {
+
+    private List<String> tokens;
+    private int pointer;
+    private String thisToken;
+    private String fileName;
+    private String filePath;
+    private final String BLANK = " ";
+
+    public JackTokenizer(String filePath) {
+        initPointer();
+        tokens = new ArrayList<String>();
+        String line;
+        try {
+            BufferedReader in = new BufferedReader(new FileReader(filePath));
+            this.filePath = filePath;
+            File file = new File(filePath);
+            String tempFileName = file.getName();
+            this.fileName = tempFileName.substring(0, tempFileName.lastIndexOf('.'));
+            line = in.readLine();
+
+            // variable to check if the line is a multi-line comment
+            boolean isMuilLineNeglect = false;
+            while (line != null) {
+                line = line.trim();
+
+                // check if the line is a multi-line comment
+                if (line.startsWith("/*") && !line.endsWith("*/")) {
+                    isMuilLineNeglect = true;
+                    line = in.readLine();
+                    continue;
+                } else if (line.endsWith("*/") || line.startsWith("*/")) {
+                    isMuilLineNeglect = false;
+                    line = in.readLine();
+                    continue;
+                } else if (line.startsWith("/*") && line.endsWith("*/")) {
+                    line = in.readLine();
+                    continue;
+                }
+
+                // neglect empty lines and single line comments
+                if (line.equals("") || isMuilLineNeglect || line.startsWith("//")) {
+                    line = in.readLine();
+                    continue;
+                }
+
+                // e.g. let x="hello world";
+                // split the line into ["let x=", "hello world"], and only tokenize the first part, and add the second part as string constant
+                String[] segment = line.split("//")[0].trim().split("\"");
+                boolean even = true;
+                for (int i = 0; i < segment.length; i++) {
+                    String statement = segment[i];
+                    if (even) {
+                        String[] words = statement.split("\\s+");
+                        for (int j = 0; j < words.length; j++) {
+                            List<String> thisLineTokes = new ArrayList<>();
+                            splitToToken(words[j], thisLineTokes);
+                            tokens.addAll(thisLineTokes);
+                        }
+                        even = false;
+                    } else {
+                        tokens.add(StringUtils.wrapByDoubleQuotation(statement));
+                        even = true;
+                    }
+                }
+                line = in.readLine();
+            }
+            in.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Splits a given word into tokens and adds them to the provided list.
+     * This method handles symbols and recursively splits the word if it contains any symbols.
+     *
+     * @param word   the word to be split into tokens
+     * @param tokens the list to which the tokens will be added
+     */
+    private void splitToToken(String word, List<String> tokens) {
+        if (word == null || word.isEmpty()) {
+            return;
+        }
+        if (word.length() == 1) {
+            tokens.add(word);
+            return;
+        }
+        boolean isContainSymbol = false;
+
+        for (int i = 0; i < symbols.size(); i++) {
+            String symbol = symbols.get(i);
+            if (word.contains(symbol)) {
+                isContainSymbol = true;
+                int symbolIdx = word.indexOf(symbol);
+                splitToToken(word.substring(0, symbolIdx), tokens);
+                tokens.add(symbol);
+                if (symbolIdx + 1 < word.length()) {
+                    splitToToken(word.substring(symbolIdx + 1), tokens);
+                }
+                break;
+            }
+        }
+        if (!isContainSymbol) {
+            tokens.add(word);
+        }
+    }
+
+    public void advance() {
+        if (pointer < tokens.size() - 1) {
+            pointer++;
+            this.thisToken = tokens.get(pointer);
+        } else {
+            throw new RuntimeException("No more tokens to advance to!");
+        }
+    }
+
+
+
+    public Boolean hasMoreTokens() {
+        return (Boolean) (pointer < tokens.size() - 1);
+    }
+
+
+    public TokenType tokenType() {
+        // TODO: Implement token type determination logic
+        // Hints:
+        // - Check if `thisToken` is in the `keywords` list and return `KEYWORD` if true.
+        // - Check if `thisToken` is in the `symbols` list and return `SYMBOL` if true.
+        // - Use `NumberUtils.isNumeric(thisToken)` to check for numeric values and return `INT_CONSTANT` if true.
+        // - Check if `thisToken` starts and ends with double quotes to identify string constants and return `STRING_CONSTANT` if true.
+        // - If `thisToken` starts with a digit, throw a `RuntimeException` for syntax error.
+        // - If none of the above conditions are met, return `IDENTIFIER`.
+        for (String keyword : keywords) {
+            if (thisToken.equals(keyword)) {
+                return TokenType.KEYWORD;
+            }
+        }
+
+        for (String symbol : symbols) {
+            if (thisToken.equals(symbol)) {
+                return TokenType.SYMBOL;
+            }
+        }
+
+        if (NumberUtils.isNumeric(thisToken)) {
+            return TokenType.INT_CONSTANT;
+        }
+
+        if (thisToken.startsWith("\"") && thisToken.endsWith("\"") && thisToken.length() >= 2) {
+            return TokenType.STRING_CONSTANT;
+        }
+
+        if (Character.isDigit(thisToken.charAt(0))) {
+            throw new RuntimeException("Syntax error: Token starts with a digit but is not a valid integer.");
+        }
+
+        return TokenType.IDENTIFIER;
+    }
+
+    public String keyword() {
+        if (tokenType() != KEYWORD) {
+            throw new RuntimeException("only when type of token is 'KEYWORD' can keyword()");
+        }
+        return thisToken;
+    }
+
+    public String symbol() {
+        if (tokenType() != SYMBOL) {
+            throw new RuntimeException("only when type of token is 'SYMBOL' can symbol()");
+        }
+        String token = thisToken;
+        switch (thisToken) {
+            case ">":
+                token = "&gt;";
+                break;
+            case "<":
+                token = "&lt;";
+                break;
+            case "&":
+                token = "&amp;";
+                break;
+        }
+        return token;
+    }
+
+    public String identifier() {
+        if (tokenType() != IDENTIFIER) {
+            throw new RuntimeException("only when type of token is 'IDENTIFIER' can identifier()");
+        }
+        return thisToken;
+    }
+
+    public int intVal() {
+        if (tokenType() != INT_CONSTANT) {
+            throw new RuntimeException("only when type of token is 'INT_CONSTANT' can intVal()");
+        }
+        return Integer.parseInt(thisToken);
+    }
+
+    public String stringVal() {
+        if (tokenType() != STRING_CONSTANT) {
+            throw new RuntimeException("only when type of token is 'STRING_CONSTANT' can stringVal()");
+        }
+        return thisToken.replace("\"", "");
+    }
+
+    public void initPointer() {
+        pointer = -1;
+    }
+
+    public String getThisToken() {
+        return tokens.get(pointer);
+    }
+
+
+    public String getThisTokenAsTag() {
+        return switch (tokenType()) {
+            case SYMBOL -> StringUtils.wrapBySymbolTag(symbol());
+            case KEYWORD -> StringUtils.wrapByKeywordTag(keyword());
+            case IDENTIFIER -> StringUtils.wrapByIdentifierTag(identifier());
+            case INT_CONSTANT -> StringUtils.wrapByIntegerConstantTag(String.valueOf(intVal()));
+            case STRING_CONSTANT -> StringUtils.wrapByStringConstantTag(stringVal());
+        };
+    }
+
+    public String getFileName() {
+        return fileName;
+    }
+
+    public String getFilePath() {
+        return filePath;
+    }
+
+    public boolean isKeywordConstant() {
+        if (thisToken.equals(KEYWORD_TRUE) ||
+                thisToken.equals(KEYWORD_FALSE) ||
+                thisToken.equals(KEYWORD_NULL) ||
+                thisToken.equals(KEYWORD_THIS)) {
+            return true;
+        }
+        return false;
+    }
+
+
+    public boolean isFunKeyword() {
+        if (thisToken.equals(KEYWORD_CONSTRUCTOR) ||
+                thisToken.equals(KEYWORD_FUNCTION) ||
+                thisToken.equals(KEYWORD_METHOD)) {
+            return true;
+        }
+        return false;
+    }
+
+    public boolean isPrimitiveType() {
+        if (thisToken.equals(KEYWORD_INT) ||
+                thisToken.equals(KEYWORD_CHAR) ||
+                thisToken.equals(KEYWORD_BOOLEAN)) {
+            return true;
+        }
+        return false;
+    }
+
+    public boolean isStatement() {
+        if (tokenType() == TokenType.KEYWORD &&
+                (thisToken.equals(KEYWORD_LET) ||
+                        thisToken.equals(KEYWORD_IF) ||
+                        thisToken.equals(KEYWORD_WHILE) ||
+                        thisToken.equals(KEYWORD_DO) ||
+                        thisToken.equals(KEYWORD_RETURN))) {
+            return true;
+        }
+        return false;
+    }
+
+    public boolean isClassVarType() {
+        if (thisToken.equals(KEYWORD_FIELD) ||
+                thisToken.equals(KEYWORD_STATIC)) {
+            return true;
+        }
+        return false;
+    }
+
+    public boolean isVarType() {
+        if (thisToken.equals(KEYWORD_VAR)) {
+            return true;
+        }
+        return false;
+    }
+
+    public boolean isOp() {
+        if (tokenType() == TokenType.SYMBOL) {
+            switch (thisToken) {
+                case "+":
+                case "-":
+                case "*":
+                case "/":
+                case "&":
+                case "|":
+                case "<":
+                case ">":
+                case "=":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+        return false;
+    }
+
+    public void printTokens() {
+        for (String token : tokens) {
+            System.out.println("Token: " + token + ", Type: " + tokenType());
+        }
+    }
+
+
+    public boolean isUnaryOp() {
+        if (tokenType() == TokenType.SYMBOL &&
+                (thisToken.equals("-") || thisToken.equals("~"))) {
+            return true;
+        }
+        return false;
+    }
+}
+
+<tokens>
+    <keyword> class </keyword>
+    <identifier> Main </identifier>
+    <symbol> { </symbol>
+    <keyword> static </keyword>
+    <keyword> boolean </keyword>
+    <identifier> test </identifier>
+    <symbol> ; </symbol>
+    <keyword> function </keyword>
+    <keyword> void </keyword>
+    <identifier> main </identifier>
+    <symbol> ( </symbol>
+    <symbol> ) </symbol>
+    <symbol> { </symbol>
+    <keyword> var </keyword>
+    <identifier> SquareGame </identifier>
+    <identifier> game </identifier>
+    <symbol> ; </symbol>
+    <keyword> let </keyword>
+    <identifier> game </identifier>
+    <symbol> = </symbol>
+    <identifier> game </identifier>
+    <symbol> ; </symbol>
+    <keyword> do </keyword>
+    <identifier> game </identifier>
+    <symbol> . </symbol>
+    <identifier> run </identifier>
+    <symbol> ( </symbol>
+    <symbol> ) </symbol>
+    <symbol> ; </symbol>
+    <keyword> do </keyword>
+    <identifier> game </identifier>
+    <symbol> . </symbol>
+    <identifier> dispose </identifier>
+    <symbol> ( </symbol>
+    <symbol> ) </symbol>
+    <symbol> ; </symbol>
+    <keyword> return </keyword>
+    <symbol> ; </symbol>
+    <symbol> } </symbol>
+    <keyword> function </keyword>
+    <keyword> void </keyword>
+    <identifier> test </identifier>
+    <symbol> ( </symbol>
+    <symbol> ) </symbol>
+    <symbol> { </symbol>
+    <keyword> var </keyword>
+    <keyword> int </keyword>
+    <identifier> i </identifier>
+    <symbol> , </symbol>
+    <identifier> j </identifier>
+    <symbol> ; </symbol>
+    <keyword> var </keyword>
+    <identifier> String </identifier>
+    <identifier> s </identifier>
+    <symbol> ; </symbol>
+    <keyword> var </keyword>
+    <identifier> Array </identifier>
+    <identifier> a </identifier>
+    <symbol> ; </symbol>
+    <keyword> if </keyword>
+    <symbol> ( </symbol>
+    <identifier> i </identifier>
+    <symbol> ) </symbol>
+    <symbol> { </symbol>
+    <keyword> let </keyword>
+    <identifier> s </identifier>
+    <symbol> = </symbol>
+    <identifier> i </identifier>
+    <symbol> ; </symbol>
+    <keyword> let </keyword>
+    <identifier> s </identifier>
+    <symbol> = </symbol>
+    <identifier> j </identifier>
+    <symbol> ; </symbol>
+    <keyword> let </keyword>
+    <identifier> a </identifier>
+    <symbol> [ </symbol>
+    <identifier> i </identifier>
+    <symbol> ] </symbol>
+    <symbol> = </symbol>
+    <identifier> j </identifier>
+    <symbol> ; </symbol>
+    <symbol> } </symbol>
+    <keyword> else </keyword>
+    <symbol> { </symbol>
+    <keyword> let </keyword>
+    <identifier> i </identifier>
+    <symbol> = </symbol>
+    <identifier> i </identifier>
+    <symbol> ; </symbol>
+    <keyword> let </keyword>
+    <identifier> j </identifier>
+    <symbol> = </symbol>
+    <identifier> j </identifier>
+    <symbol> ; </symbol>
+    <keyword> let </keyword>
+    <identifier> i </identifier>
+    <symbol> = </symbol>
+    <identifier> i </identifier>
+    <symbol> | </symbol>
+    <identifier> j </identifier>
+    <symbol> ; </symbol>
+    <symbol> } </symbol>
+    <keyword> return </keyword>
+    <symbol> ; </symbol>
+    <symbol> } </symbol>
+    <symbol> } </symbol>
+</tokens>
+
+<class>
+<keyword>class</keyword>
+<identifier>Main</identifier>
+<symbol>{</symbol>
+<classVarDec>
+<keyword>static</keyword>
+<keyword>boolean</keyword>
+<identifier>test</identifier>
+<symbol>;</symbol>
+</classVarDec>
+<subroutineDec>
+<keyword>function</keyword>
+<keyword>void</keyword>
+<identifier>main</identifier>
+<symbol>(</symbol>
+<parameterList></parameterList>
+<symbol>)</symbol>
+<subroutineBody>
+<symbol>{</symbol>
+<varDec>
+<keyword>var</keyword>
+<identifier>SquareGame</identifier>
+<identifier>game</identifier>
+<symbol>;</symbol>
+</varDec>
+<statements>
+<letStatement>
+<keyword>let</keyword>
+<identifier>game</identifier>
+<symbol>=</symbol>
+<expression>
+<term>
+<identifier>SquareGame</identifier>
+<symbol>.</symbol>
+<identifier>new</identifier>
+<symbol>(</symbol>
+<expressionList>
+</expressionList>
+<symbol>)</symbol>
+</term>
+</expression>
+<symbol>;</symbol>
+</letStatement>
+<doStatement>
+<keyword>do</keyword>
+<identifier>game</identifier>
+<symbol>.</symbol>
+<identifier>run</identifier>
+<symbol>(</symbol>
+<expressionList>
+</expressionList>
+<symbol>)</symbol>
+<symbol>;</symbol>
+</doStatement>
+<doStatement>
+<keyword>do</keyword>
+<identifier>game</identifier>
+<symbol>.</symbol>
+<identifier>dispose</identifier>
+<symbol>(</symbol>
+<expressionList>
+</expressionList>
+<symbol>)</symbol>
+<symbol>;</symbol>
+</doStatement>
+<returnStatement>
+<keyword>return</keyword>
+<symbol>;</symbol>
+</returnStatement>
+</statements>
+<symbol>}</symbol>
+</subroutineDec>
+<subroutineDec>
+<keyword>function</keyword>
+<keyword>void</keyword>
+<identifier>test</identifier>
+<symbol>(</symbol>
+<parameterList></parameterList>
+<symbol>)</symbol>
+<subroutineBody>
+<symbol>{</symbol>
+<varDec>
+<keyword>var</keyword>
+<keyword>int</keyword>
+<identifier>x</identifier>
+<symbol>,</symbol>
+<identifier>i</identifier>
+<symbol>,</symbol>
+<identifier>j</identifier>
+<symbol>;</symbol>
+</varDec>
+<varDec>
+<keyword>var</keyword>
+<identifier>String</identifier>
+<identifier>s</identifier>
+<symbol>;</symbol>
+</varDec>
+<varDec>
+<keyword>var</keyword>
+<identifier>Array</identifier>
+<identifier>a</identifier>
+<symbol>;</symbol>
+</varDec>
+<statements>
+<ifStatement>
+<keyword>if</keyword>
+<symbol>(</symbol>
+<expression>
+<term>
+<identifier>x</identifier>
+</term>
+<symbol>&lt;</symbol>
+<term>
+<integerConstant>0</integerConstant>
+</term>
+</expression>
+<symbol>)</symbol>
+<symbol>{</symbol>
+<statements>
+<returnStatement>
+<keyword>return</keyword>
+<expression>
+<term>
+<keyword>true</keyword>
+</term>
+</expression>
+<symbol>;</symbol>
+</returnStatement>
+</statements>
+<symbol>}</symbol>
+<keyword>else</keyword>
+<symbol>{</symbol>
+<statements>
+<returnStatement>
+<keyword>return</keyword>
+<expression>
+<term>
+<keyword>false</keyword>
+</term>
+</expression>
+<symbol>;</symbol>
+</returnStatement>
+</statements>
+<symbol>}</symbol>
+</ifStatement>
+<whileStatement>
+<keyword>while</keyword>
+<symbol>(</symbol>
+<expression>
+<term>
+<identifier>x</identifier>
+</term>
+<symbol>&lt;</symbol>
+<term>
+<integerConstant>10</integerConstant>
+</term>
+</expression>
+<symbol>)</symbol>
+<symbol>{</symbol>
+<statements>
+<letStatement>
+<keyword>let</keyword>
+<identifier>x</identifier>
+<symbol>=</symbol>
+<expression>
+<term>
+<identifier>x</identifier>
+</term>
+<symbol>+</symbol>
+<term>
+<integerConstant>1</integerConstant>
+</term>
+</expression>
+<symbol>;</symbol>
+</letStatement>
+</statements>
+<symbol>}</symbol>
+</whileStatement>
+<ifStatement>
+<keyword>if</keyword>
+<symbol>(</symbol>
+<expression>
+<term>
+<keyword>false</keyword>
+</term>
+</expression>
+<symbol>)</symbol>
+<symbol>{</symbol>
+<statements>
+<letStatement>
+<keyword>let</keyword>
+<identifier>s</identifier>
+<symbol>=</symbol>
+<expression>
+<term>
+<stringConstant>string constant</stringConstant>
+</term>
+</expression>
+<symbol>;</symbol>
+</letStatement>
+<letStatement>
+<keyword>let</keyword>
+<identifier>s</identifier>
+<symbol>=</symbol>
+<expression>
+<term>
+<keyword>null</keyword>
+</term>
+</expression>
+<symbol>;</symbol>
+</letStatement>
+<letStatement>
+<keyword>let</keyword>
+<identifier>a</identifier>
+<symbol>[</symbol>
+<expression>
+<term>
+<integerConstant>1</integerConstant>
+</term>
+</expression>
+<symbol>]</symbol>
+<symbol>=</symbol>
+<expression>
+<term>
+<identifier>a</identifier>
+<symbol>[</symbol>
+<expression>
+<term>
+<integerConstant>2</integerConstant>
+</term>
+</expression>
+<symbol>]</symbol>
+</term>
+</expression>
+<symbol>;</symbol>
+</letStatement>
+</statements>
+<symbol>}</symbol>
+<keyword>else</keyword>
+<symbol>{</symbol>
+<statements>
+<letStatement>
+<keyword>let</keyword>
+<identifier>i</identifier>
+<symbol>=</symbol>
+<expression>
+<term>
+<identifier>i</identifier>
+</term>
+<symbol>*</symbol>
+<term>
+<symbol>(</symbol>
+<expression>
+<term>
+<symbol>-</symbol>
+<term>
+<identifier>j</identifier>
+</term>
+</term>
+</expression>
+<symbol>)</symbol>
+</term>
+</expression>
+<symbol>;</symbol>
+</letStatement>
+<letStatement>
+<keyword>let</keyword>
+<identifier>j</identifier>
+<symbol>=</symbol>
+<expression>
+<term>
+<identifier>j</identifier>
+</term>
+<symbol>/</symbol>
+<term>
+<symbol>(</symbol>
+<expression>
+<term>
+<symbol>-</symbol>
+<term>
+<integerConstant>2</integerConstant>
+</term>
+</term>
+</expression>
+<symbol>)</symbol>
+</term>
+</expression>
+<symbol>;</symbol>
+</letStatement>
+<letStatement>
+<keyword>let</keyword>
+<identifier>i</identifier>
+<symbol>=</symbol>
+<expression>
+<term>
+<identifier>i</identifier>
+</term>
+<symbol>|</symbol>
+<term>
+<identifier>j</identifier>
+</term>
+</expression>
+<symbol>;</symbol>
+</letStatement>
+</statements>
+<symbol>}</symbol>
+</ifStatement>
+<returnStatement>
+<keyword>return</keyword>
+<symbol>;</symbol>
+</returnStatement>
+</statements>
+<symbol>}</symbol>
+</subroutineDec>
+<symbol>}</symbol>
+</class>
+<class>
+<keyword>class</keyword>
+<identifier>Main</identifier>
+<symbol>{</symbol>
+<subroutineDec>
+<keyword>function</keyword>
+<keyword>void</keyword>
+<identifier>main</identifier>
+<symbol>(</symbol>
+<parameterList>
+</parameterList>
+<symbol>)</symbol>
+<subroutineBody>
+<symbol>{</symbol>
+<varDec>
+<keyword>var</keyword>
+<identifier>Array</identifier>
+<identifier>a</identifier>
+<symbol>;</symbol>
+</varDec>
+<varDec>
+<keyword>var</keyword>
+<keyword>int</keyword>
+<identifier>length</identifier>
+<symbol>;</symbol>
+</varDec>
+<varDec>
+<keyword>var</keyword>
+<keyword>int</keyword>
+<identifier>i</identifier>
+<symbol>,</symbol>
+<identifier>sum</identifier>
+<symbol>;</symbol>
+</varDec>
+<statements>
+<letStatement>
+<keyword>let</keyword>
+<identifier>length</identifier>
+<symbol>=</symbol>
+<expression>
+<term>
+<identifier>Keyboard</identifier>
+<symbol>.</symbol>
+<identifier>readInt</identifier>
+<symbol>(</symbol>
+<expressionList>
+<expression>
+<term>
+<stringConstant>HOW MANY NUMBERS? </stringConstant>
+</term>
+</expression>
+</expressionList>
+<symbol>)</symbol>
+</term>
+</expression>
+<symbol>;</symbol>
+</letStatement>
+<letStatement>
+<keyword>let</keyword>
+<identifier>a</identifier>
+<symbol>=</symbol>
+<expression>
+<term>
+<identifier>Array</identifier>
+<symbol>.</symbol>
+<identifier>new</identifier>
+<symbol>(</symbol>
+<expressionList>
+<expression>
+<term>
+<identifier>length</identifier>
+</term>
+</expression>
+</expressionList>
+<symbol>)</symbol>
+</term>
+</expression>
+<symbol>;</symbol>
+</letStatement>
+<letStatement>
+<keyword>let</keyword>
+<identifier>i</identifier>
+<symbol>=</symbol>
+<expression>
+<term>
+<integerConstant>0</integerConstant>
+</term>
+</expression>
+<symbol>;</symbol>
+</letStatement>
+<whileStatement>
+<keyword>while</keyword>
+<symbol>(</symbol>
+<expression>
+<term>
+<identifier>i</identifier>
+</term>
+<symbol>&lt;</symbol>
+<term>
+<identifier>length</identifier>
+</term>
+</expression>
+<symbol>)</symbol>
+<symbol>{</symbol>
+<statements>
+<letStatement>
+<keyword>let</keyword>
+<identifier>a</identifier>
+<symbol>[</symbol>
+<expression>
+<term>
+<identifier>i</identifier>
+</term>
+</expression>
+<symbol>]</symbol>
+<symbol>=</symbol>
+<expression>
+<term>
+<identifier>Keyboard</identifier>
+<symbol>.</symbol>
+<identifier>readInt</identifier>
+<symbol>(</symbol>
+<expressionList>
+<expression>
+<term>
+<stringConstant>ENTER THE NEXT NUMBER: </stringConstant>
+</term>
+</expression>
+</expressionList>
+<symbol>)</symbol>
+</term>
+</expression>
+<symbol>;</symbol>
+</letStatement>
+<letStatement>
+<keyword>let</keyword>
+<identifier>i</identifier>
+<symbol>=</symbol>
+<expression>
+<term>
+<identifier>i</identifier>
+</term>
+<symbol>+</symbol>
+<term>
+<integerConstant>1</integerConstant>
+</term>
+</expression>
+<symbol>;</symbol>
+</letStatement>
+</statements>
+<symbol>}</symbol>
+</whileStatement>
+<letStatement>
+<keyword>let</keyword>
+<identifier>i</identifier>
+<symbol>=</symbol>
+<expression>
+<term>
+<integerConstant>0</integerConstant>
+</term>
+</expression>
+<symbol>;</symbol>
+</letStatement>
+<letStatement>
+<keyword>let</keyword>
+<identifier>sum</identifier>
+<symbol>=</symbol>
+<expression>
+<term>
+<integerConstant>0</integerConstant>
+</term>
+</expression>
+<symbol>;</symbol>
+</letStatement>
+<whileStatement>
+<keyword>while</keyword>
+<symbol>(</symbol>
+<expression>
+<term>
+<identifier>i</identifier>
+</term>
+<symbol>&lt;</symbol>
+<term>
+<identifier>length</identifier>
+</term>
+</expression>
+<symbol>)</symbol>
+<symbol>{</symbol>
+<statements>
+<letStatement>
+<keyword>let</keyword>
+<identifier>sum</identifier>
+<symbol>=</symbol>
+<expression>
+<term>
+<identifier>sum</identifier>
+</term>
+<symbol>+</symbol>
+<term>
+<identifier>a</identifier>
+<symbol>[</symbol>
+<expression>
+<term>
+<identifier>i</identifier>
+</term>
+</expression>
+<symbol>]</symbol>
+</term>
+</expression>
+<symbol>;</symbol>
+</letStatement>
+<letStatement>
+<keyword>let</keyword>
+<identifier>i</identifier>
+<symbol>=</symbol>
+<expression>
+<term>
+<identifier>i</identifier>
+</term>
+<symbol>+</symbol>
+<term>
+<integerConstant>1</integerConstant>
+</term>
+</expression>
+<symbol>;</symbol>
+</letStatement>
+</statements>
+<symbol>}</symbol>
+</whileStatement>
+<doStatement>
+<keyword>do</keyword>
+<identifier>Output</identifier>
+<symbol>.</symbol>
+<identifier>printString</identifier>
+<symbol>(</symbol>
+<expressionList>
+<expression>
+<term>
+<stringConstant>THE AVERAGE IS: </stringConstant>
+</term>
+</expression>
+</expressionList>
+<symbol>)</symbol>
+<symbol>;</symbol>
+</doStatement>
+<doStatement>
+<keyword>do</keyword>
+<identifier>Output</identifier>
+<symbol>.</symbol>
+<identifier>printInt</identifier>
+<symbol>(</symbol>
+<expressionList>
+<expression>
+<term>
+<identifier>sum</identifier>
+</term>
+<symbol>/</symbol>
+<term>
+<identifier>length</identifier>
+</term>
+</expression>
+</expressionList>
+<symbol>)</symbol>
+<symbol>;</symbol>
+</doStatement>
+<doStatement>
+<keyword>do</keyword>
+<identifier>Output</identifier>
+<symbol>.</symbol>
+<identifier>println</identifier>
+<symbol>(</symbol>
+<expressionList>
+</expressionList>
+<symbol>)</symbol>
+<symbol>;</symbol>
+</doStatement>
+<returnStatement>
+<keyword>return</keyword>
+<symbol>;</symbol>
+</returnStatement>
+</statements>
+<symbol>}</symbol>
+</subroutineBody>
+</subroutineDec>
+<symbol>}</symbol>
+</class>
+<tokens>
+<keyword> class </keyword>
+<identifier> Main </identifier>
+<symbol> { </symbol>
+<keyword> static </keyword>
+<keyword> boolean </keyword>
+<identifier> test </identifier>
+<symbol> ; </symbol>
+<keyword> function </keyword>
+<keyword> void </keyword>
+<identifier> main </identifier>
+<symbol> ( </symbol>
+<symbol> ) </symbol>
+<symbol> { </symbol>
+<keyword> var </keyword>
+<identifier> SquareGame </identifier>
+<identifier> game </identifier>
+<symbol> ; </symbol>
+<keyword> let </keyword>
+<identifier> game </identifier>
+<symbol> = </symbol>
+<identifier> game </identifier>
+<symbol> ; </symbol>
+<keyword> do </keyword>
+<identifier> game </identifier>
+<symbol> . </symbol>
+<identifier> run </identifier>
+<symbol> ( </symbol>
+<symbol> ) </symbol>
+<symbol> ; </symbol>
+<keyword> do </keyword>
+<identifier> game </identifier>
+<symbol> . </symbol>
+<identifier> dispose </identifier>
+<symbol> ( </symbol>
+<symbol> ) </symbol>
+<symbol> ; </symbol>
+<keyword> return </keyword>
+<symbol> ; </symbol>
+<symbol> } </symbol>
+<keyword> function </keyword>
+<keyword> void </keyword>
+<identifier> test </identifier>
+<symbol> ( </symbol>
+<symbol> ) </symbol>
+<symbol> { </symbol>
+<keyword> var </keyword>
+<keyword> int </keyword>
+<identifier> i </identifier>
+<symbol> , </symbol>
+<identifier> j </identifier>
+<symbol> ; </symbol>
+<keyword> var </keyword>
+<identifier> String </identifier>
+<identifier> s </identifier>
+<symbol> ; </symbol>
+<keyword> var </keyword>
+<identifier> Array </identifier>
+<identifier> a </identifier>
+<symbol> ; </symbol>
+<keyword> if </keyword>
+<symbol> ( </symbol>
+<identifier> i </identifier>
+<symbol> ) </symbol>
+<symbol> { </symbol>
+<keyword> let </keyword>
+<identifier> s </identifier>
+<symbol> = </symbol>
+<identifier> i </identifier>
+<symbol> ; </symbol>
+<keyword> let </keyword>
+<identifier> s </identifier>
+<symbol> = </symbol>
+<identifier> j </identifier>
+<symbol> ; </symbol>
+<keyword> let </keyword>
+<identifier> a </identifier>
+<symbol> [ </symbol>
+<identifier> i </identifier>
+<symbol> ] </symbol>
+<symbol> = </symbol>
+<identifier> j </identifier>
+<symbol> ; </symbol>
+<symbol> } </symbol>
+<keyword> else </keyword>
+<symbol> { </symbol>
+<keyword> let </keyword>
+<identifier> i </identifier>
+<symbol> = </symbol>
+<identifier> i </identifier>
+<symbol> ; </symbol>
+<keyword> let </keyword>
+<identifier> j </identifier>
+<symbol> = </symbol>
+<identifier> j </identifier>
+<symbol> ; </symbol>
+<keyword> let </keyword>
+<identifier> i </identifier>
+<symbol> = </symbol>
+<identifier> i </identifier>
+<symbol> | </symbol>
+<identifier> j </identifier>
+<symbol> ; </symbol>
+<symbol> } </symbol>
+<keyword> return </keyword>
+<symbol> ; </symbol>
+<symbol> } </symbol>
+<symbol> } </symbol>
+</tokens>
+
+package utils;
+
+import java.util.regex.Pattern;
+
+public class NumberUtils {
+
+    public static boolean isNumeric(String str) {
+        Pattern pattern = Pattern.compile("[0-9]+");
+        if (!pattern.matcher(str).matches()) {
+            return false;
+        }
+
+        int i = Integer.parseInt(str);
+        if (i >= 0 && i <= 32767) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+}
